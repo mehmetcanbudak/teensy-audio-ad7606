@@ -40,14 +40,15 @@ public:
     AudioInputAD7606(void) : AudioStream(0, NULL) { begin(); }
     virtual void update(void);
     void begin(void);
+    void timingFix(bool enabled);
 protected:
     static bool update_responsibility;
     static DMAChannel dmarx;
     static DMAChannel dmatx;
     static void isr(void);
     static void busyFallingEdgeISR();
-    static bool ready;
     static uint8_t index;
+    static uint8_t bytesToRead;
 private:
     static audio_block_t *block_incoming[8];
 };

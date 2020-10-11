@@ -41,29 +41,26 @@
 #define AD7607_CHIP_SELECT 36
 #define AD7607_RESET 4
 
-//DMAMEM __attribute__((aligned(32)))
-int8_t buf[16];
-uint16_t txbuf[8];
+int8_t buf[25];
+uint16_t txbuf[13];
 audio_block_t * AudioInputAD7606::block_incoming[8] = {
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr
 };
 bool AudioInputAD7606::update_responsibility = false;
 DMAChannel AudioInputAD7606::dmarx(false);
 DMAChannel AudioInputAD7606::dmatx(false);
-bool AudioInputAD7606::ready = false;
 uint8_t AudioInputAD7606::index = 0;
+uint8_t AudioInputAD7606::bytesToRead = 25;         // Only need 16 bytes, but 25 bytes allow us to get more regular samples (whn SPI SCK is 14Mhz)
 
 void AudioInputAD7606::busyFallingEdgeISR() {
-    if (ready && index < 128) {
-        dmarx.destinationBuffer(buf, 16);
-        dmarx.transferCount(16);
+    if (index < 128) {
+        dmarx.destinationBuffer(buf, bytesToRead);
+        dmarx.transferCount(bytesToRead);
         dmarx.transferSize(1);
 
-        dmatx.sourceBuffer(txbuf, 16);
-        dmatx.transferCount(16);
+        dmatx.sourceBuffer(txbuf, bytesToRead);
+        dmatx.transferCount(bytesToRead);
         dmatx.transferSize(1);
-
-
 
         digitalWrite(AD7607_CHIP_SELECT, LOW);
 
@@ -75,25 +72,13 @@ void AudioInputAD7606::busyFallingEdgeISR() {
         IMXRT_LPSPI1_S.SR = 0x3f00; // StatusRegister: clear out all of the other status...
 
         SPI2.beginTransaction(SPISettings(14000000, MSBFIRST, SPI_MODE0));
-        //SPI2.beginTransaction(SPISettings());
         dmarx.enable();
         dmatx.enable();
-
-
     };
 }
 
 void AudioInputAD7606::begin(void)
 {
-    Serial.begin(9600);
-    while (!Serial) {
-        delay(1);
-    }
-    pinMode(31, INPUT); // SPI1 SCK copy
-    pinMode(37, INPUT);
-    pinMode(34, INPUT);
-
-    Serial.println("begin()");
     pinMode(AD7607_BUSY, INPUT_PULLUP);
     pinMode(AD7607_START_CONVERSION, OUTPUT);
     pinMode(AD7607_CHIP_SELECT, OUTPUT);
@@ -103,9 +88,9 @@ void AudioInputAD7606::begin(void)
 
     attachInterrupt(AD7607_BUSY, busyFallingEdgeISR, FALLING);
 
-    SPI2.setSCK(49);
-    SPI2.setMISO(54);
-    SPI2.begin();
+    SPI2.setSCK(49);        // Using SPI2 SCK on pins on underside of teensy 4.1
+    SPI2.setMISO(54);       // Using SPI2 MISO on pins on underside of teensy 4.1
+    SPI2.begin();           // Start SPI2
 
     dmatx.begin(true); // allocate the DMA channel first
     dmatx.destination((volatile uint8_t &)IMXRT_LPSPI1_S.TDR);
@@ -120,29 +105,20 @@ void AudioInputAD7606::begin(void)
     dmarx.disableOnCompletion();
     update_responsibility = update_setup();
     dmarx.attachInterrupt(isr);
-    Serial.println("3");
 
     digitalWrite(AD7607_START_CONVERSION, LOW);
-    delayMicroseconds(1);
-    ready = true;
     digitalWrite(AD7607_START_CONVERSION, HIGH);
 }
 
 void AudioInputAD7606::isr(void)
 {
-    //Serial.println("isr");
-    //Serial.flush();
-    //SPI2.endTransaction();
-
     dmarx.clearInterrupt();
-    ready = false;
     dmarx.disable();
     dmatx.disable();
 
     digitalWrite(AD7607_CHIP_SELECT, HIGH);
 
     SPI2.endTransaction();
-    //Serial.printf("IN: %d, %d, %d, %d, %d, %d, %d, %d\n", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
     if (index < 128) {
         for (int i = 0; i < 8; i++) {
             if (block_incoming[i] != NULL)
@@ -151,8 +127,6 @@ void AudioInputAD7606::isr(void)
         index++;
 
         digitalWrite(AD7607_START_CONVERSION, LOW);
-        delayMicroseconds(1);
-        ready = true;
         digitalWrite(AD7607_START_CONVERSION, HIGH);
     };
 }
@@ -187,7 +161,24 @@ void AudioInputAD7606::update(void)
     }
     index = 0;
     digitalWrite(AD7607_START_CONVERSION, LOW);
-    delayMicroseconds(1);
-    ready = true;
     digitalWrite(AD7607_START_CONVERSION, HIGH);
+}
+
+void AudioInputAD7606::timingFix(bool enabled) {
+    if (enabled) {
+        // reading extra bytes, and ignoring the extra bytes,
+        // means the audio library buffer update takes about
+        // the same amount of time to read as the samples are read,
+        // making the read rate much more regular
+        bytesToRead = 25;
+    }
+    else {
+        // only read 16 bytes.
+        // reading one buffer of 8 bytes * 2 bytes/sample * 128 samples
+        // takes much less time than the audio buffer callback occurs...
+        // basically, the buffer will fill with samples very quickly
+        // and then wait for the audio callback to fill the buffer
+        // so the sample rate is very irregular
+        bytesToRead = 16;
+    }
 }

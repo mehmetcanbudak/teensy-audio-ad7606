@@ -42,8 +42,8 @@
 #define AD7607_RESET 4
 
 //DMAMEM __attribute__((aligned(32)))
-static int16_t buf[8];
-static uint16_t txbuf[8];
+int8_t buf[16];
+uint16_t txbuf[8];
 audio_block_t * AudioInputAD7606::block_incoming[8] = {
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr
 };
@@ -146,7 +146,7 @@ void AudioInputAD7606::isr(void)
     if (index < 128) {
         for (int i = 0; i < 8; i++) {
             if (block_incoming[i] != NULL)
-                block_incoming[i]->data[index] = buf[i];
+                block_incoming[i]->data[index] = (buf[i * 2] << 8) + buf[(i*2)+1];
         }
         index++;
 

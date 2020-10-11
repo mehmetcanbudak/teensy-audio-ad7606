@@ -47,6 +47,7 @@ protected:
     static void isr(void);
     static void busyFallingEdgeISR();
     static bool ready;
+    static uint8_t index;
 private:
     static audio_block_t *block_incoming[8];
 };
